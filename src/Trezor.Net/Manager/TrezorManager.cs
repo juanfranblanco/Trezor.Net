@@ -1,5 +1,4 @@
-﻿using Hardwarewallets.Net.Model;
-using Hid.Net;
+﻿using Hid.Net;
 using System;
 using System.Text;
 using System.Threading.Tasks;
@@ -48,12 +47,44 @@ namespace Trezor.Net
         #endregion
 
         #region Constructor
-        public TrezorManager(EnterPinArgs enterPinCallback, IHidDevice trezorHidDevice) : this(enterPinCallback, trezorHidDevice, null)
+        public TrezorManager(EnterPinArgs enterPinCallback, IHidDevice trezorHidDevice) : base(enterPinCallback, trezorHidDevice)
         {
         }
+        #endregion
 
-        public TrezorManager(EnterPinArgs enterPinCallback, IHidDevice trezorHidDevice, ICoinUtility coinUtility) : base(enterPinCallback, trezorHidDevice, coinUtility)
+        #region Private Methods
+
+        /// <summary>
+        /// TODO: Dependency injection
+        /// </summary>
+        private CoinType GetCoinType(uint coinNumber)
         {
+            switch (coinNumber)
+            {
+                case 0:
+                    return new CoinType { CoinName = "Bitcoin", Segwit = true };
+                case 60:
+                    return new CoinType { CoinName = "Ethereum", Segwit = false };
+            }
+
+            throw new NotImplementedException();
+        }
+
+        /// <summary>
+        /// TODO: Dependency injection
+        /// </summary>
+        private CoinType GetCoinType(string coinShortcut)
+        {
+            switch (coinShortcut)
+            {
+                case "BTC":
+                    return new CoinType { CoinName = "Bitcoin", Segwit = true };
+                case "ETH":
+                    return new CoinType { CoinName = "Ethereum", Segwit = false };
+
+            }
+
+            throw new NotImplementedException();
         }
         #endregion
 
@@ -446,67 +477,67 @@ namespace Trezor.Net
         #endregion
 
         #region Public Methods
-        public override Task<string> GetAddressAsync(IAddressPath addressPath, bool isPublicKey, bool display)
+        /// <summary>
+        /// Get the Trezor's public key at the specified index.
+        /// </summary>
+        public Task<PublicKey> GetPublicKeyAsync(string coinShortcut, uint addressNumber)
         {
-            if (CoinUtility == null)
-            {
-                throw new ManagerException($"A {nameof(CoinUtility)} must be specified if {nameof(AddressType)} is not specified.");
-            }
+            return SendMessageAsync<PublicKey, GetPublicKey>(new GetPublicKey { CoinName = GetCoinType(coinShortcut).CoinName, AddressNs = new[] { addressNumber } });
+        }
+        #endregion
 
-            var coinInfo = CoinUtility.GetCoinInfo(addressPath.CoinType);
-
-            return GetAddressAsync(addressPath, isPublicKey, display, coinInfo);
+        #region Public Overrides
+        public Task<string> GetAddressAsync(string coinShortcut, uint coinNumber, bool isChange, uint index, bool showDisplay, AddressType addressType)
+        {
+            return GetAddressAsync(coinShortcut, coinNumber, 0, isChange, index, showDisplay, addressType, null);
         }
 
-        public Task<string> GetAddressAsync(IAddressPath addressPath, bool isPublicKey, bool display, CoinInfo coinInfo)
-        {
-            var inputScriptType = addressPath.Purpose == 49 ? InputScriptType.Spendp2shwitness : InputScriptType.Spendaddress;
-
-            return GetAddressAsync(addressPath, isPublicKey, display, coinInfo.AddressType, inputScriptType, coinInfo.CoinName);
-        }
-
-        public Task<string> GetAddressAsync(IAddressPath addressPath, bool isPublicKey, bool display, AddressType addressType, InputScriptType inputScriptType)
-        {
-            return GetAddressAsync(addressPath, isPublicKey, display, addressType, inputScriptType, null);
-        }
-
-        public async Task<string> GetAddressAsync(IAddressPath addressPath, bool isPublicKey, bool display, AddressType addressType, InputScriptType inputScriptType, string coinName)
+        /// <summary>
+        /// Get an address from the Trezor
+        /// //TODO: Move this back down to TrezorManagerBase
+        /// </summary>
+        public async Task<string> GetAddressAsync(string coinShortcut, uint coinNumber, uint account, bool isChange, uint index, bool showDisplay, AddressType addressType, bool? isSegwit)
         {
             try
             {
-                var path = addressPath.ToHardenedArray();
+                ValidateInitialization(null);
 
-                if (isPublicKey)
+                //ETH and ETC don't appear here so we have to hard code these not to be segwit
+                //var coinType = Features.Coins.Find(c => string.Equals(c.CoinShortcut, coinShortcut, StringComparison.OrdinalIgnoreCase));
+
+                var coinType = GetCoinType(coinNumber);
+
+                if (isSegwit == null)
                 {
-                    var publicKey = await SendMessageAsync<PublicKey, GetPublicKey>(new GetPublicKey { CoinName = coinName, AddressNs = path, ShowDisplay = display, ScriptType = inputScriptType });
-                    return publicKey.Xpub;
+                    isSegwit = coinType?.Segwit == true;
                 }
-                else
+
+                var path = ManagerHelpers.GetAddressPath(isSegwit.Value, account, isChange, index, coinNumber);
+
+                switch (addressType)
                 {
-                    var isSegwit = addressPath.Purpose == 49;
+                    case AddressType.Bitcoin:
 
-                    switch (addressType)
-                    {
-                        case AddressType.Bitcoin:
+                        return (await SendMessageAsync<Address, GetAddress>(new GetAddress { ShowDisplay = showDisplay, AddressNs = path, CoinName = GetCoinType(coinShortcut)?.CoinName, ScriptType = isSegwit.Value ? InputScriptType.Spendp2shwitness : InputScriptType.Spendaddress })).address;
 
-                            return (await SendMessageAsync<Address, GetAddress>(new GetAddress { ShowDisplay = display, AddressNs = path, CoinName = coinName, ScriptType = inputScriptType })).address;
+                    case AddressType.Ethereum:
 
-                        case AddressType.Ethereum:
+                        var ethereumAddress = await SendMessageAsync<EthereumAddress, EthereumGetAddress>(new EthereumGetAddress { ShowDisplay = showDisplay, AddressNs = path });
 
-                            var ethereumAddress = await SendMessageAsync<EthereumAddress, EthereumGetAddress>(new EthereumGetAddress { ShowDisplay = display, AddressNs = path });
+                        var sb = new StringBuilder();
+                        foreach (var b in ethereumAddress.Address)
+                        {
+                            sb.Append(b.ToString("X2").ToLower());
+                        }
 
-                            var sb = new StringBuilder();
-                            foreach (var b in ethereumAddress.Address)
-                            {
-                                sb.Append(b.ToString("X2").ToLower());
-                            }
+                        var hexString = sb.ToString();
 
-                            var hexString = sb.ToString();
+                        return $"0x{hexString}";
 
-                            return $"0x{hexString}";
-                        default:
-                            throw new NotImplementedException();
-                    }
+                    case AddressType.NEM:
+                        throw new NotImplementedException();
+                    default:
+                        throw new NotImplementedException();
                 }
             }
             catch (Exception ex)

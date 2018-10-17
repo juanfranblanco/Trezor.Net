@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Nethereum.Signer" Version="3.0.0-rc1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Trezor.Net\Trezor.Net.csproj" />
   </ItemGroup>
 

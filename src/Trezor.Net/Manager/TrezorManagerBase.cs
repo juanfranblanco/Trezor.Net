@@ -1,6 +1,4 @@
-﻿using Hardwarewallets.Net;
-using Hardwarewallets.Net.Model;
-using Hid.Net;
+﻿using Hid.Net;
 using ProtoBuf;
 using System;
 using System.Collections.Generic;
@@ -15,7 +13,7 @@ namespace Trezor.Net
     /// <summary>
     /// An interface for dealing with the Trezor that works across all platforms
     /// </summary>
-    public abstract class TrezorManagerBase<TMessageType> : IDisposable, IAddressDeriver
+    public abstract class TrezorManagerBase<TMessageType> : IDisposable
     {
         #region Events
         public event EventHandler Connected;
@@ -35,12 +33,8 @@ namespace Trezor.Net
         #endregion
 
         #region Private Static Fields
-        private static readonly Assembly[] _Assemblies;
+        private static Assembly[] _Assemblies;
         private static readonly Dictionary<string, Type> _ContractsByName = new Dictionary<string, Type>();
-        #endregion
-
-        #region Public Properties
-        public ICoinUtility CoinUtility { get; set; }
         #endregion
 
         #region Public Abstract Properties
@@ -53,15 +47,8 @@ namespace Trezor.Net
         #endregion
 
         #region Constructor
-        protected TrezorManagerBase(EnterPinArgs enterPinCallback, IHidDevice hidDevice) : this(enterPinCallback, hidDevice, null)
+        protected TrezorManagerBase(EnterPinArgs enterPinCallback, IHidDevice hidDevice)
         {
-
-        }
-
-        protected TrezorManagerBase(EnterPinArgs enterPinCallback, IHidDevice hidDevice, ICoinUtility coinUtility)
-        {
-            CoinUtility = coinUtility;
-
             if (hidDevice == null)
             {
                 throw new ArgumentNullException(nameof(hidDevice));
@@ -164,10 +151,6 @@ namespace Trezor.Net
 
         #endregion
 
-        #region Public Abstract Methods
-        public abstract Task<string> GetAddressAsync(IAddressPath addressPath, bool isPublicKey, bool display);
-        #endregion
-
         #region Private Methods
         private async Task WriteAsync(object msg)
         {
@@ -217,6 +200,7 @@ namespace Trezor.Net
         {
             //Read a chunk
             var readBuffer = await _HidDevice.ReadAsync();
+            TMessageType messageType;
 
             //Check to see that this is a valid first chunk 
             var firstByteNot63 = readBuffer[0] != (byte)'?';
@@ -255,7 +239,7 @@ namespace Trezor.Net
             //Get the message type
             var messageTypeValueName = Enum.GetName(MessageTypeType, messageTypeInt);
 
-            var messageType = (TMessageType)Enum.Parse(MessageTypeType, messageTypeValueName);
+            messageType = (TMessageType)Enum.Parse(MessageTypeType, messageTypeValueName);
 
             //msgLength:= int(binary.BigEndian.Uint32(buf[i + 4 : i + 8]))
             //TODO: Is this correct?
@@ -305,8 +289,7 @@ namespace Trezor.Net
                 {
                     continue;
                 }
-
-                allData = Append(allData, GetRange(readBuffer, length , 1));
+                allData = Append(allData, GetRange(readBuffer, length, 1));
                 remainingDataLength = 0;
             }
 
